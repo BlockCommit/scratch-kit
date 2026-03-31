@@ -88,6 +88,7 @@ export class SB3Parser {
   private extractProjectInfo(projectJson: any): SB3ProjectInfo {
     const targets = projectJson.targets || [];
     const extensions = projectJson.extensions || [];
+    const meta = projectJson.meta || {};
     
     // 计算积木总数
     let totalBlocks = 0;
@@ -112,12 +113,21 @@ export class SB3Parser {
       }
     }
 
+    // 提取平台信息
+    const platformInfo = meta.platform ? {
+      name: meta.platform.name || 'Unknown',
+      url: meta.platform.url
+    } : undefined;
+
     return {
-      name: projectJson.meta?.name || 'Untitled',
+      name: meta.name || 'Untitled',
       spriteCount: targets.length,
       totalBlocks,
       extensions,
-      monitorCount
+      monitorCount,
+      platform: platformInfo,
+      semver: meta.semver,
+      vm: meta.vm
     };
   }
 

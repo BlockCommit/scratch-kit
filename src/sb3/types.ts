@@ -2,6 +2,14 @@
  * SB3 项目类型定义
  */
 
+/** 平台信息 */
+export interface PlatformInfo {
+  /** 平台名称 */
+  name: string;
+  /** 平台 URL */
+  url?: string;
+}
+
 /** SB3 项目基本信息 */
 export interface SB3ProjectInfo {
   /** 项目名称 */
@@ -14,6 +22,12 @@ export interface SB3ProjectInfo {
   extensions: string[];
   /** 监控器数量 */
   monitorCount: number;
+  /** 平台信息 */
+  platform?: PlatformInfo;
+  /** Scratch 版本 */
+  semver?: string;
+  /** VM 版本 */
+  vm?: string;
 }
 
 /** 角色信息 */
