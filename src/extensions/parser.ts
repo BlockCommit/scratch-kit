@@ -4,9 +4,14 @@
  */
 
 import { parse } from '@babel/parser';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
 import traverse from '@babel/traverse';
 import * as t from '@babel/types';
 import type { ExtensionMetadata, BlockDefinition, ArgumentDefinition, MenuDefinition, ExtensionBlockType, ExtensionArgumentType } from './types.js';
+
+// @ts-ignore
+const traverseFunc = (traverse as any).default || traverse;
 
 export class ExtensionParser {
   private sourceCode: string;
@@ -27,16 +32,16 @@ export class ExtensionParser {
     });
 
     const metadata: ExtensionMetadata = {
-      id: this.extractId(ast.program),
-      name: this.extractName(ast.program),
-      color1: this.extractColor1(ast.program),
-      color2: this.extractColor2(ast.program),
-      color3: this.extractColor3(ast.program),
-      menuIconURI: this.extractMenuIconURI(ast.program),
-      blockIconURI: this.extractBlockIconURI(ast.program),
-      docsURI: this.extractDocsURI(ast.program),
-      blocks: this.extractBlocks(ast.program),
-      menus: this.extractMenus(ast.program),
+      id: this.extractId(ast),
+      name: this.extractName(ast),
+      color1: this.extractColor1(ast),
+      color2: this.extractColor2(ast),
+      color3: this.extractColor3(ast),
+      menuIconURI: this.extractMenuIconURI(ast),
+      blockIconURI: this.extractBlockIconURI(ast),
+      docsURI: this.extractDocsURI(ast),
+      blocks: this.extractBlocks(ast),
+      menus: this.extractMenus(ast),
       unsandboxed: this.isUnsandboxed(),
       sourceCode: this.sourceCode,
     };
@@ -48,24 +53,22 @@ export class ExtensionParser {
   /**
    * 查找 getInfo() 方法的返回值
    */
-  private findGetInfoReturn(ast: t.Program): t.ObjectExpression | null {
+  private findGetInfoReturn(ast: t.File): t.ObjectExpression | null {
     let getInfoReturn: t.ObjectExpression | null = null;
 
-    traverse(ast, {
-      ReturnStatement(path) {
-        // 检查是否在 getInfo 方法中
-        const functionPath = path.findParent(p => 
-          t.isFunctionExpression(p.node) || t.isFunctionDeclaration(p.node)
-        );
-        
-        if (functionPath && functionPath.parentPath && t.isObjectProperty(functionPath.parentPath.node)) {
-          const methodName = functionPath.parentPath.node.key;
-          if (t.isIdentifier(methodName) && methodName.name === 'getInfo') {
-            const argument = path.node.argument;
-            if (t.isObjectExpression(argument)) {
-              getInfoReturn = argument;
+    traverseFunc(ast, {
+      ClassMethod(path) {
+        // 检查是否是 getInfo 方法
+        if (t.isIdentifier(path.node.key) && path.node.key.name === 'getInfo') {
+          // 查找方法体中的 return 语句
+          path.traverse({
+            ReturnStatement(returnPath) {
+              const argument = returnPath.node.argument;
+              if (t.isObjectExpression(argument)) {
+                getInfoReturn = argument;
+              }
             }
-          }
+          });
         }
       }
     });
@@ -91,7 +94,7 @@ export class ExtensionParser {
   /**
    * 提取扩展 ID
    */
-  private extractId(ast: t.Program): string {
+  private extractId(ast: t.File): string {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return 'unknown';
     
@@ -101,7 +104,7 @@ export class ExtensionParser {
   /**
    * 提取扩展名称
    */
-  private extractName(ast: t.Program): string {
+  private extractName(ast: t.File): string {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return 'Unknown Extension';
     
@@ -111,21 +114,21 @@ export class ExtensionParser {
   /**
    * 提取颜色值
    */
-  private extractColor1(ast: t.Program): string {
+  private extractColor1(ast: t.File): string {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return '#ff4c4c';
     
     return this.getObjectPropertyValue(getInfo, 'color1') || '#ff4c4c';
   }
 
-  private extractColor2(ast: t.Program): string {
+  private extractColor2(ast: t.File): string {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return '#d83e00';
     
     return this.getObjectPropertyValue(getInfo, 'color2') || '#d83e00';
   }
 
-  private extractColor3(ast: t.Program): string {
+  private extractColor3(ast: t.File): string {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return '#8f5700';
     
@@ -135,14 +138,14 @@ export class ExtensionParser {
   /**
    * 提取图标 URI
    */
-  private extractMenuIconURI(ast: t.Program): string | undefined {
+  private extractMenuIconURI(ast: t.File): string | undefined {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return undefined;
     
     return this.getObjectPropertyValue(getInfo, 'menuIconURI');
   }
 
-  private extractBlockIconURI(ast: t.Program): string | undefined {
+  private extractBlockIconURI(ast: t.File): string | undefined {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return undefined;
     
@@ -152,7 +155,7 @@ export class ExtensionParser {
   /**
    * 提取文档 URI
    */
-  private extractDocsURI(ast: t.Program): string | undefined {
+  private extractDocsURI(ast: t.File): string | undefined {
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return undefined;
     
@@ -170,7 +173,7 @@ export class ExtensionParser {
   /**
    * 提取所有积木定义
    */
-  private extractBlocks(ast: t.Program): BlockDefinition[] {
+  private extractBlocks(ast: t.File): BlockDefinition[] {
     const blocks: BlockDefinition[] = [];
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return blocks;
@@ -230,12 +233,16 @@ export class ExtensionParser {
     for (const prop of blockObj.properties) {
       if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'blockType') {
         const value = prop.value;
-        if (t.isMemberExpression(value) && 
-            t.isIdentifier(value.object) && value.object.name === 'Scratch' &&
-            t.isIdentifier(value.property)) {
-          const typeName = value.property.name;
-          if (['COMMAND', 'REPORTER', 'BOOLEAN', 'HAT', 'EVENT'].includes(typeName)) {
-            return typeName as ExtensionBlockType;
+        if (t.isMemberExpression(value)) {
+          // Scratch.BlockType.REPORTER -> value.object = Scratch.BlockType, value.property = REPORTER
+          if (t.isMemberExpression(value.object) &&
+              t.isIdentifier(value.object.object) && value.object.object.name === 'Scratch' &&
+              t.isIdentifier(value.object.property) && value.object.property.name === 'BlockType' &&
+              t.isIdentifier(value.property)) {
+            const typeName = value.property.name;
+            if (['COMMAND', 'REPORTER', 'BOOLEAN', 'HAT', 'EVENT'].includes(typeName)) {
+              return typeName as ExtensionBlockType;
+            }
           }
         }
       }
@@ -296,12 +303,16 @@ export class ExtensionParser {
     for (const prop of argObj.properties) {
       if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'type') {
         const value = prop.value;
-        if (t.isMemberExpression(value) &&
-            t.isIdentifier(value.object) && value.object.name === 'Scratch' &&
-            t.isIdentifier(value.property)) {
-          const typeName = value.property.name;
-          if (['STRING', 'NUMBER', 'BOOLEAN', 'COLOR', 'ANGLE', 'MATRIX', 'NOTE', 'IMAGE', 'COSTUME', 'SOUND'].includes(typeName)) {
-            return typeName as ExtensionArgumentType;
+        if (t.isMemberExpression(value)) {
+          // Scratch.ArgumentType.STRING -> value.object = Scratch.ArgumentType, value.property = STRING
+          if (t.isMemberExpression(value.object) &&
+              t.isIdentifier(value.object.object) && value.object.object.name === 'Scratch' &&
+              t.isIdentifier(value.object.property) && value.object.property.name === 'ArgumentType' &&
+              t.isIdentifier(value.property)) {
+            const typeName = value.property.name;
+            if (['STRING', 'NUMBER', 'BOOLEAN', 'COLOR', 'ANGLE', 'MATRIX', 'NOTE', 'IMAGE', 'COSTUME', 'SOUND'].includes(typeName)) {
+              return typeName as ExtensionArgumentType;
+            }
           }
         }
       }
@@ -339,7 +350,7 @@ export class ExtensionParser {
   /**
    * 提取所有菜单定义
    */
-  private extractMenus(ast: t.Program): Record<string, MenuDefinition> {
+  private extractMenus(ast: t.File): Record<string, MenuDefinition> {
     const menus: Record<string, MenuDefinition> = {};
     const getInfo = this.findGetInfoReturn(ast);
     if (!getInfo) return menus;
