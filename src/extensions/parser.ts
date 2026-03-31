@@ -1,13 +1,13 @@
 /**
  * TurboWarp 扩展解析器
- * 用于解析扩展的元数据、积木定义和参数信息
+ * 使用 Babel AST 解析，更加准确和健壮
  */
 
+import { parse } from '@babel/parser';
+import traverse from '@babel/traverse';
+import * as t from '@babel/types';
 import type { ExtensionMetadata, BlockDefinition, ArgumentDefinition, MenuDefinition, ExtensionBlockType, ExtensionArgumentType } from './types.js';
 
-/**
- * 从扩展类源码中提取信息
- */
 export class ExtensionParser {
   private sourceCode: string;
   private extensionMetadata: ExtensionMetadata | null = null;
@@ -20,17 +20,23 @@ export class ExtensionParser {
    * 解析扩展，提取所有信息
    */
   parse(): ExtensionMetadata {
+    // 解析源代码为 AST
+    const ast = parse(this.sourceCode, {
+      sourceType: 'module',
+      plugins: ['jsx']
+    });
+
     const metadata: ExtensionMetadata = {
-      id: this.extractId(),
-      name: this.extractName(),
-      color1: this.extractColor1(),
-      color2: this.extractColor2(),
-      color3: this.extractColor3(),
-      menuIconURI: this.extractMenuIconURI(),
-      blockIconURI: this.extractBlockIconURI(),
-      docsURI: this.extractDocsURI(),
-      blocks: this.extractBlocks(),
-      menus: this.extractMenus(),
+      id: this.extractId(ast.program),
+      name: this.extractName(ast.program),
+      color1: this.extractColor1(ast.program),
+      color2: this.extractColor2(ast.program),
+      color3: this.extractColor3(ast.program),
+      menuIconURI: this.extractMenuIconURI(ast.program),
+      blockIconURI: this.extractBlockIconURI(ast.program),
+      docsURI: this.extractDocsURI(ast.program),
+      blocks: this.extractBlocks(ast.program),
+      menus: this.extractMenus(ast.program),
       unsandboxed: this.isUnsandboxed(),
       sourceCode: this.sourceCode,
     };
@@ -40,58 +46,117 @@ export class ExtensionParser {
   }
 
   /**
+   * 查找 getInfo() 方法的返回值
+   */
+  private findGetInfoReturn(ast: t.Program): t.ObjectExpression | null {
+    let getInfoReturn: t.ObjectExpression | null = null;
+
+    traverse(ast, {
+      ReturnStatement(path) {
+        // 检查是否在 getInfo 方法中
+        const functionPath = path.findParent(p => 
+          t.isFunctionExpression(p.node) || t.isFunctionDeclaration(p.node)
+        );
+        
+        if (functionPath && functionPath.parentPath && t.isObjectProperty(functionPath.parentPath.node)) {
+          const methodName = functionPath.parentPath.node.key;
+          if (t.isIdentifier(methodName) && methodName.name === 'getInfo') {
+            const argument = path.node.argument;
+            if (t.isObjectExpression(argument)) {
+              getInfoReturn = argument;
+            }
+          }
+        }
+      }
+    });
+
+    return getInfoReturn;
+  }
+
+  /**
+   * 从对象表达式中提取属性值
+   */
+  private getObjectPropertyValue(obj: t.ObjectExpression, propertyName: string): string | undefined {
+    for (const prop of obj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === propertyName) {
+        const value = prop.value;
+        if (t.isStringLiteral(value)) {
+          return value.value;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * 提取扩展 ID
    */
-  private extractId(): string {
-    const match = this.sourceCode.match(/id:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : 'unknown';
+  private extractId(ast: t.Program): string {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return 'unknown';
+    
+    return this.getObjectPropertyValue(getInfo, 'id') || 'unknown';
   }
 
   /**
    * 提取扩展名称
    */
-  private extractName(): string {
-    const match = this.sourceCode.match(/name:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : 'Unknown Extension';
+  private extractName(ast: t.Program): string {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return 'Unknown Extension';
+    
+    return this.getObjectPropertyValue(getInfo, 'name') || 'Unknown Extension';
   }
 
   /**
    * 提取颜色值
    */
-  private extractColor1(): string {
-    const match = this.sourceCode.match(/color1:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : '#ff4c4c';
+  private extractColor1(ast: t.Program): string {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return '#ff4c4c';
+    
+    return this.getObjectPropertyValue(getInfo, 'color1') || '#ff4c4c';
   }
 
-  private extractColor2(): string {
-    const match = this.sourceCode.match(/color2:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : '#d83e00';
+  private extractColor2(ast: t.Program): string {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return '#d83e00';
+    
+    return this.getObjectPropertyValue(getInfo, 'color2') || '#d83e00';
   }
 
-  private extractColor3(): string {
-    const match = this.sourceCode.match(/color3:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : '#8f5700';
+  private extractColor3(ast: t.Program): string {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return '#8f5700';
+    
+    return this.getObjectPropertyValue(getInfo, 'color3') || '#8f5700';
   }
 
   /**
    * 提取图标 URI
    */
-  private extractMenuIconURI(): string | undefined {
-    const match = this.sourceCode.match(/menuIconURI:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : undefined;
+  private extractMenuIconURI(ast: t.Program): string | undefined {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return undefined;
+    
+    return this.getObjectPropertyValue(getInfo, 'menuIconURI');
   }
 
-  private extractBlockIconURI(): string | undefined {
-    const match = this.sourceCode.match(/blockIconURI:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : undefined;
+  private extractBlockIconURI(ast: t.Program): string | undefined {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return undefined;
+    
+    return this.getObjectPropertyValue(getInfo, 'blockIconURI');
   }
 
   /**
    * 提取文档 URI
    */
-  private extractDocsURI(): string | undefined {
-    const match = this.sourceCode.match(/docsURI:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : undefined;
+  private extractDocsURI(ast: t.Program): string | undefined {
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return undefined;
+    
+    return this.getObjectPropertyValue(getInfo, 'docsURI');
   }
 
   /**
@@ -105,26 +170,32 @@ export class ExtensionParser {
   /**
    * 提取所有积木定义
    */
-  private extractBlocks(): BlockDefinition[] {
+  private extractBlocks(ast: t.Program): BlockDefinition[] {
     const blocks: BlockDefinition[] = [];
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return blocks;
 
-    // 查找 blocks 数组
-    const blocksArrayMatch = this.sourceCode.match(/blocks:\s*\[([\s\S]*?)\],?\s*(menus|docsURI|color|blockIconURI|\})/);
-    if (!blocksArrayMatch) return blocks;
+    const blocksProperties = getInfo.properties.filter(prop => 
+      t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'blocks'
+    );
 
-    const blocksContent = blocksArrayMatch[1];
+    if (blocksProperties.length === 0) return blocks;
+    
+    const blocksProperty = blocksProperties[0] as t.ObjectProperty;
+    if (!t.isArrayExpression(blocksProperty.value)) {
+      return blocks;
+    }
 
-    // 提取每个积木对象
-    const blockObjects = this.extractObjects(blocksContent);
-
-    for (const blockObj of blockObjects) {
-      try {
-        const block = this.parseBlock(blockObj);
+    const blocksArray = blocksProperty.value.elements;
+    for (const element of blocksArray) {
+      if (t.isObjectExpression(element)) {
+        const block = this.parseBlock(element);
         if (block) {
           blocks.push(block);
         }
-      } catch (error) {
-        console.warn(`无法解析积木: ${error.message}`);
+      } else if (t.isStringLiteral(element) && element.value === '---') {
+        // 分隔符，跳过
+        continue;
       }
     }
 
@@ -134,16 +205,11 @@ export class ExtensionParser {
   /**
    * 解析单个积木
    */
-  private parseBlock(blockObj: string): BlockDefinition | null {
-    // 跳过分隔符
-    if (blockObj.trim() === '---') {
-      return null;
-    }
-
+  private parseBlock(blockObj: t.ObjectExpression): BlockDefinition | null {
     const block: BlockDefinition = {
-      opcode: this.extractProperty(blockObj, 'opcode'),
+      opcode: this.getObjectPropertyValue(blockObj, 'opcode') || '',
       blockType: this.extractBlockType(blockObj),
-      text: this.extractText(blockObj),
+      text: this.getObjectPropertyValue(blockObj, 'text') || '',
       arguments: this.extractArguments(blockObj),
       isEdgeActivated: this.extractBooleanProperty(blockObj, 'isEdgeActivated', false),
       shouldRestartExistingThreads: this.extractBooleanProperty(blockObj, 'shouldRestartExistingThreads', false),
@@ -151,7 +217,7 @@ export class ExtensionParser {
       hideFromPalette: this.extractBooleanProperty(blockObj, 'hideFromPalette', false),
       filter: this.extractFilter(blockObj),
       isTerminal: this.extractBooleanProperty(blockObj, 'isTerminal', false),
-      blockIconURI: this.extractProperty(blockObj, 'blockIconURI'),
+      blockIconURI: this.getObjectPropertyValue(blockObj, 'blockIconURI'),
     };
 
     return block;
@@ -160,101 +226,48 @@ export class ExtensionParser {
   /**
    * 提取积木类型
    */
-  private extractBlockType(blockObj: string): ExtensionBlockType {
-    const match = blockObj.match(/blockType:\s*Scratch\.BlockType\.(\w+)/);
-    return (match ? match[1] : 'COMMAND') as ExtensionBlockType;
-  }
-
-  /**
-   * 提取积木文本
-   */
-  private extractText(blockObj: string): string {
-    const match = blockObj.match(/text:\s*['\"`]([^'\"`]+)['\"`]/);
-    return match ? match[1] : '';
+  private extractBlockType(blockObj: t.ObjectExpression): ExtensionBlockType {
+    for (const prop of blockObj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'blockType') {
+        const value = prop.value;
+        if (t.isMemberExpression(value) && 
+            t.isIdentifier(value.object) && value.object.name === 'Scratch' &&
+            t.isIdentifier(value.property)) {
+          const typeName = value.property.name;
+          if (['COMMAND', 'REPORTER', 'BOOLEAN', 'HAT', 'EVENT'].includes(typeName)) {
+            return typeName as ExtensionBlockType;
+          }
+        }
+      }
+    }
+    return 'COMMAND' as ExtensionBlockType;
   }
 
   /**
    * 提取参数定义
    */
-  private extractArguments(blockObj: string): Record<string, ArgumentDefinition> {
-    const argumentsMatch = blockObj.match(/arguments:\s*\{([\s\S]*?)\}/);
-    if (!argumentsMatch) return {};
-
+  private extractArguments(blockObj: t.ObjectExpression): Record<string, ArgumentDefinition> {
     const args: Record<string, ArgumentDefinition> = {};
-    const argsContent = argumentsMatch[1];
 
-    // 手动提取参数名和参数内容
-    const lines = argsContent.split('\n');
-    let currentIndent = null;
-    let currentParamName = null;
-    let paramContent = '';
-    let braceDepth = 0;
-    let inParam = false;
+    const argumentsProperties = blockObj.properties.filter(prop => 
+      t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'arguments'
+    );
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // 计算缩进
-      const indent = line.search(/\S/);
-
-      // 检查是否是参数名行（缩进最少的行，且以参数名: { 开始）
-      const paramNameMatch = line.match(/^(\s*)(\w+):\s*\{?/);
-      if (paramNameMatch && (currentIndent === null || indent <= currentIndent)) {
-        // 保存前一个参数
-        if (currentParamName && paramContent) {
-          try {
-            const fullParamContent = '{' + paramContent.trim() + '}';
-            args[currentParamName] = this.parseArgument(fullParamContent);
-          } catch (error) {
-            console.warn(`无法解析参数 ${currentParamName}: ${error.message}`);
-          }
-        }
-
-        // 开始新参数
-        currentIndent = indent;
-        currentParamName = paramNameMatch[2];
-        paramContent = '';
-        braceDepth = 0;
-        inParam = true;
-
-        // 处理当前行的内容
-        if (line.includes('{')) {
-          const contentAfterBrace = line.substring(line.indexOf('{') + 1);
-          const openBraces = (contentAfterBrace.match(/\{/g) || []).length;
-          const closeBraces = (contentAfterBrace.match(/\}/g) || []).length;
-          braceDepth = openBraces - closeBraces;
-
-          if (braceDepth <= 0 && closeBraces > 0) {
-            // 当行完成
-            const lastBraceIndex = contentAfterBrace.lastIndexOf('}');
-            paramContent = contentAfterBrace.substring(0, lastBraceIndex);
-            inParam = false;
-          } else {
-            paramContent = contentAfterBrace + '\n';
-          }
-        }
-      } else if (inParam) {
-        paramContent += line + '\n';
-        const openBraces = (line.match(/\{/g) || []).length;
-        const closeBraces = (line.match(/\}/g) || []).length;
-        braceDepth += openBraces - closeBraces;
-
-        if (braceDepth <= 0 && closeBraces > 0) {
-          // 找到闭合大括号
-          const lastBraceIndex = line.lastIndexOf('}');
-          paramContent = paramContent.substring(0, paramContent.lastIndexOf('}'));
-          inParam = false;
-        }
-      }
+    if (argumentsProperties.length === 0) return args;
+    
+    const argumentsProperty = argumentsProperties[0] as t.ObjectProperty;
+    if (!t.isObjectExpression(argumentsProperty.value)) {
+      return args;
     }
 
-    // 处理最后一个参数
-    if (currentParamName && paramContent) {
-      try {
-        const fullParamContent = '{' + paramContent.trim() + '}';
-        args[currentParamName] = this.parseArgument(fullParamContent);
-      } catch (error) {
-        console.warn(`无法解析参数 ${currentParamName}: ${error.message}`);
+    const argsObj = argumentsProperty.value;
+    for (const prop of argsObj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
+        const argName = prop.key.name;
+        const value = prop.value;
+        if (t.isObjectExpression(value)) {
+          args[argName] = this.parseArgument(value);
+        }
       }
     }
 
@@ -264,13 +277,13 @@ export class ExtensionParser {
   /**
    * 解析单个参数
    */
-  private parseArgument(paramContent: string): ArgumentDefinition {
+  private parseArgument(argObj: t.ObjectExpression): ArgumentDefinition {
     const arg: ArgumentDefinition = {
-      type: this.extractArgumentType(paramContent),
-      defaultValue: this.extractProperty(paramContent, 'defaultValue'),
-      menu: this.extractProperty(paramContent, 'menu'),
-      dataURI: this.extractProperty(paramContent, 'dataURI'),
-      flipRTL: this.extractBooleanProperty(paramContent, 'flipRTL', false),
+      type: this.extractArgumentType(argObj),
+      defaultValue: this.getObjectPropertyValue(argObj, 'defaultValue'),
+      menu: this.getObjectPropertyValue(argObj, 'menu'),
+      dataURI: this.getObjectPropertyValue(argObj, 'dataURI'),
+      flipRTL: this.extractBooleanProperty(argObj, 'flipRTL', false),
     };
 
     return arg;
@@ -279,25 +292,45 @@ export class ExtensionParser {
   /**
    * 提取参数类型
    */
-  private extractArgumentType(content: string): ExtensionArgumentType {
-    const match = content.match(/type:\s*Scratch\.ArgumentType\.(\w+)/);
-    return (match ? match[1] : 'STRING') as ExtensionArgumentType;
+  private extractArgumentType(argObj: t.ObjectExpression): ExtensionArgumentType {
+    for (const prop of argObj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'type') {
+        const value = prop.value;
+        if (t.isMemberExpression(value) &&
+            t.isIdentifier(value.object) && value.object.name === 'Scratch' &&
+            t.isIdentifier(value.property)) {
+          const typeName = value.property.name;
+          if (['STRING', 'NUMBER', 'BOOLEAN', 'COLOR', 'ANGLE', 'MATRIX', 'NOTE', 'IMAGE', 'COSTUME', 'SOUND'].includes(typeName)) {
+            return typeName as ExtensionArgumentType;
+          }
+        }
+      }
+    }
+    return 'STRING' as ExtensionArgumentType;
   }
 
   /**
    * 提取过滤器
    */
-  private extractFilter(blockObj: string): string[] | undefined {
-    const filterMatch = blockObj.match(/filter:\s*\[([\s\S]*?)\]/);
-    if (!filterMatch) return undefined;
+  private extractFilter(blockObj: t.ObjectExpression): string[] | undefined {
+    const filterProperties = blockObj.properties.filter(prop =>
+      t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'filter'
+    );
+
+    if (filterProperties.length === 0) return undefined;
+    
+    const filterProperty = filterProperties[0] as t.ObjectProperty;
+    if (!t.isArrayExpression(filterProperty.value)) {
+      return undefined;
+    }
 
     const filters: string[] = [];
-    const filterContent = filterMatch[1];
-
-    // 提取过滤器类型
-    const filterMatches = filterContent.matchAll(/Scratch\.TargetType\.(\w+)/g);
-    for (const match of filterMatches) {
-      filters.push(match[1]);
+    for (const element of filterProperty.value.elements) {
+      if (t.isMemberExpression(element) &&
+          t.isIdentifier(element.object) && element.object.name === 'Scratch' &&
+          t.isIdentifier(element.property)) {
+        filters.push(element.property.name);
+      }
     }
 
     return filters.length > 0 ? filters : undefined;
@@ -306,22 +339,31 @@ export class ExtensionParser {
   /**
    * 提取所有菜单定义
    */
-  private extractMenus(): Record<string, MenuDefinition> {
+  private extractMenus(ast: t.Program): Record<string, MenuDefinition> {
     const menus: Record<string, MenuDefinition> = {};
+    const getInfo = this.findGetInfoReturn(ast);
+    if (!getInfo) return menus;
 
-    // 查找 menus 对象（使用更宽松的正则表达式）
-    const menusMatch = this.sourceCode.match(/menus:\s*\{([\s\S]*?)\},?\s*(?:color1|blockIconURI|menuIconURI|docsURI|\}|\))/);
-    if (!menusMatch) return menus;
+    const menusProperties = getInfo.properties.filter(prop =>
+      t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'menus'
+    );
 
-    const menusContent = menusMatch[1];
+    if (menusProperties.length === 0) return menus;
+    
+    const menusProperty = menusProperties[0] as t.ObjectProperty;
+    if (!t.isObjectExpression(menusProperty.value)) {
+      return menus;
+    }
 
-    // 提取每个菜单
-    const menuMatches = menusContent.matchAll(/(\w+):\s*\{([^}]+)\}/g);
-    for (const match of menuMatches) {
-      const menuName = match[1];
-      const menuContent = match[2];
-
-      menus[menuName] = this.parseMenu(menuContent);
+    const menusObj = menusProperty.value;
+    for (const prop of menusObj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
+        const menuName = prop.key.name;
+        const value = prop.value;
+        if (t.isObjectExpression(value)) {
+          menus[menuName] = this.parseMenu(value);
+        }
+      }
     }
 
     return menus;
@@ -330,10 +372,10 @@ export class ExtensionParser {
   /**
    * 解析单个菜单
    */
-  private parseMenu(menuContent: string): MenuDefinition {
+  private parseMenu(menuObj: t.ObjectExpression): MenuDefinition {
     const menu: MenuDefinition = {
-      acceptReporters: this.extractBooleanProperty(menuContent, 'acceptReporters', true),
-      items: this.extractMenuItems(menuContent),
+      acceptReporters: this.extractBooleanProperty(menuObj, 'acceptReporters', true),
+      items: this.extractMenuItems(menuObj),
     };
 
     return menu;
@@ -342,42 +384,29 @@ export class ExtensionParser {
   /**
    * 提取菜单项
    */
-  private extractMenuItems(menuContent: string): Array<string | { text: string; value: string }> {
-    const itemsMatch = menuContent.match(/items:\s*\[([\s\S]*?)\]/);
-    if (!itemsMatch) return [];
+  private extractMenuItems(menuObj: t.ObjectExpression): Array<string | { text: string; value: string }> {
+    const itemsProperties = menuObj.properties.filter(prop =>
+      t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'items'
+    );
 
-    const items: Array<string | { text: string; value: string }> = [];
-    const itemsContent = itemsMatch[1];
-
-    // 先尝试匹配对象形式的菜单项
-    const objectPattern = /\{[^{}]*\}/g;
-    let match;
-    while ((match = objectPattern.exec(itemsContent)) !== null) {
-      const objText = match[0];
-      const textMatch = objText.match(/text:\s*['"]([^'"]+)['"]/);
-      const valueMatch = objText.match(/value:\s*['"]([^'"]+)['"]/);
-      if (textMatch && valueMatch) {
-        items.push({ text: textMatch[1], value: valueMatch[1] });
-      }
+    if (itemsProperties.length === 0) return [];
+    
+    const itemsProperty = itemsProperties[0] as t.ObjectProperty;
+    if (!t.isArrayExpression(itemsProperty.value)) {
+      return [];
     }
 
-    // 然后尝试匹配字符串形式的菜单项（排除对象中的字符串）
-    const stringPattern = /['"]([^'"]+)['"]/g;
-    // 重置正则表达式的 lastIndex
-    objectPattern.lastIndex = 0;
-    while ((match = stringPattern.exec(itemsContent)) !== null) {
-      const fullMatch = match[0];
-      // 检查这个字符串是否在对象内
-      const startIndex = match.index;
-      let inObject = false;
-      for (const objMatch of itemsContent.matchAll(/\{[^{}]*\}/g)) {
-        if (startIndex >= objMatch.index && startIndex < objMatch.index + objMatch[0].length) {
-          inObject = true;
-          break;
+    const items: Array<string | { text: string; value: string }> = [];
+
+    for (const element of itemsProperty.value.elements) {
+      if (t.isStringLiteral(element)) {
+        items.push(element.value);
+      } else if (t.isObjectExpression(element)) {
+        const text = this.getObjectPropertyValue(element, 'text');
+        const value = this.getObjectPropertyValue(element, 'value');
+        if (text && value) {
+          items.push({ text, value });
         }
-      }
-      if (!inObject) {
-        items.push(match[1]);
       }
     }
 
@@ -385,81 +414,18 @@ export class ExtensionParser {
   }
 
   /**
-   * 通用属性提取
-   */
-  private extractProperty(content: string, propName: string): string | undefined {
-    // 尝试双引号
-    const doubleQuoteMatch = content.match(new RegExp(`${propName}:\\s*"([^"]+)"`));
-    if (doubleQuoteMatch) return doubleQuoteMatch[1];
-
-    // 尝试单引号
-    const singleQuoteMatch = content.match(new RegExp(`${propName}:\\s*'([^']+)'`));
-    if (singleQuoteMatch) return singleQuoteMatch[1];
-
-    // 尝试反引号
-    const backtickMatch = content.match(new RegExp(`${propName}:\\s*\`([^\`]+)\``));
-    if (backtickMatch) return backtickMatch[1];
-
-    return undefined;
-  }
-
-  /**
    * 提取布尔属性
    */
-  private extractBooleanProperty(content: string, propName: string, defaultValue: boolean): boolean {
-    const match = content.match(new RegExp(`${propName}:\\s*(true|false)`));
-    return match ? match[1] === 'true' : defaultValue;
-  }
-
-  /**
-   * 从字符串中提取所有对象
-   */
-  private extractObjects(str: string): string[] {
-    const objects: string[] = [];
-    let depth = 0;
-    let currentObj = '';
-    let inString = false;
-    let stringChar = '';
-    let i = 0;
-
-    while (i < str.length) {
-      const char = str[i];
-
-      if (inString) {
-        currentObj += char;
-        if (char === stringChar && str[i - 1] !== '\\') {
-          inString = false;
+  private extractBooleanProperty(obj: t.ObjectExpression, propName: string, defaultValue: boolean): boolean {
+    for (const prop of obj.properties) {
+      if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === propName) {
+        const value = prop.value;
+        if (t.isBooleanLiteral(value)) {
+          return value.value;
         }
-        i++;
-        continue;
       }
-
-      if (char === '"' || char === "'" || char === '`') {
-        inString = true;
-        stringChar = char;
-        currentObj += char;
-        i++;
-        continue;
-      }
-
-      if (char === '{') {
-        depth++;
-        currentObj += char;
-      } else if (char === '}') {
-        depth--;
-        currentObj += char;
-        if (depth === 0) {
-          objects.push(currentObj.trim());
-          currentObj = '';
-        }
-      } else if (depth > 0) {
-        currentObj += char;
-      }
-
-      i++;
     }
-
-    return objects;
+    return defaultValue;
   }
 
   /**
