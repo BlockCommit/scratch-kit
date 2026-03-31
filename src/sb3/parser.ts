@@ -1,0 +1,266 @@
+/**
+ * SB3 项目解析器
+ * 用于解析 Scratch 3.0 的 .sb3 文件
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import AdmZip from 'adm-zip';
+import type {
+  SB3Project,
+  SB3ProjectInfo,
+  SpriteInfo,
+  ResourceInfo,
+  SB3ParseOptions
+} from './types.js';
+
+/**
+ * SB3 项目解析器
+ */
+export class SB3Parser {
+  private filePath: string;
+  private options: SB3ParseOptions;
+  private zip: AdmZip | null = null;
+
+  constructor(filePath: string, options: SB3ParseOptions = {}) {
+    this.filePath = filePath;
+    this.options = {
+      extractResources: false,
+      includeStage: true,
+      ...options
+    };
+  }
+
+  /**
+   * 解析 SB3 项目
+   */
+  async parse(): Promise<SB3Project> {
+    // 初始化 ZIP 文件
+    try {
+      this.zip = new AdmZip(this.filePath);
+    } catch (error) {
+      throw new Error(`Failed to open SB3 file: ${error.message}`);
+    }
+
+    // 读取 project.json
+    const projectJson = await this.readProjectJson();
+    
+    // 提取项目信息
+    const info = this.extractProjectInfo(projectJson);
+    
+    // 提取角色信息
+    const sprites = this.extractSpriteInfo(projectJson);
+    
+    // 提取资源信息
+    const resources = this.extractResourceInfo(projectJson, this.zip);
+
+    return {
+      info,
+      sprites,
+      resources
+    };
+  }
+
+  /**
+   * 读取 project.json 文件
+   */
+  private async readProjectJson(): Promise<any> {
+    try {
+      if (!this.zip) {
+        throw new Error('ZIP file not initialized');
+      }
+
+      const projectJsonEntry = this.zip.getEntry('project.json');
+      if (!projectJsonEntry) {
+        throw new Error('project.json not found in SB3 file');
+      }
+
+      const content = projectJsonEntry.getData().toString('utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      throw new Error(`Failed to read project.json: ${error.message}`);
+    }
+  }
+
+  /**
+   * 提取项目基本信息
+   */
+  private extractProjectInfo(projectJson: any): SB3ProjectInfo {
+    const targets = projectJson.targets || [];
+    const extensions = projectJson.extensions || [];
+    
+    // 计算积木总数
+    let totalBlocks = 0;
+    let monitorCount = 0;
+    
+    for (const target of targets) {
+      const blocks = target.blocks || {};
+      
+      for (const blockId in blocks) {
+        const block = blocks[blockId];
+        // 跳过原型定义
+        if (block.parent !== null || block.topLevel) {
+          totalBlocks++;
+          // 检查是否为监控器
+          if (block.opcode && block.opcode.startsWith('data_')) {
+            // 这是一个变量/列表监控器
+            if (block.shadow === false) {
+              monitorCount++;
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      name: projectJson.meta?.name || 'Untitled',
+      spriteCount: targets.length,
+      totalBlocks,
+      extensions,
+      monitorCount
+    };
+  }
+
+  /**
+   * 提取角色信息
+   */
+  private extractSpriteInfo(projectJson: any): SpriteInfo[] {
+    const targets = projectJson.targets || [];
+    const sprites: SpriteInfo[] = [];
+
+    for (const target of targets) {
+      const isStage = target.isStage || false;
+      
+      // 跳过舞台（如果不包含）
+      if (!this.options.includeStage && isStage) {
+        continue;
+      }
+
+      // 计算积木数量
+      let blockCount = 0;
+      const blocks = target.blocks || {};
+      
+      for (const blockId in blocks) {
+        const block = blocks[blockId];
+        if (block.parent !== null || block.topLevel) {
+          blockCount++;
+        }
+      }
+
+      // 统计变量和列表
+      const variables = target.variables || {};
+      const lists = target.lists || {};
+      const variableCount = Object.keys(variables).length / 2; // 每个变量有 2 个条目
+      const listCount = Object.keys(lists).length / 2; // 每个列表有 2 个条目
+
+      sprites.push({
+        name: target.name || 'Untitled',
+        isStage,
+        blockCount,
+        costumeCount: (target.costumes || []).length,
+        soundCount: (target.sounds || []).length,
+        variableCount,
+        listCount
+      });
+    }
+
+    return sprites;
+  }
+
+  /**
+   * 提取资源信息
+   */
+  private extractResourceInfo(projectJson: any, zip: AdmZip): ResourceInfo[] {
+    const targets = projectJson.targets || [];
+    const resources: ResourceInfo[] = [];
+
+    for (const target of targets) {
+      const spriteName = target.name || 'Untitled';
+      const isStage = target.isStage || false;
+
+      // 处理造型/背景
+      const costumes = target.costumes || [];
+      for (const costume of costumes) {
+        const assetId = costume.assetId || costume.md5ext || '';
+        const format = this.getFormatFromAsset(assetId) || 'png';
+        const filename = this.getAssetFilename(assetId);
+        
+        // 从 ZIP 中获取文件大小
+        const size = this.getFileSize(zip, filename);
+        
+        resources.push({
+          name: costume.name || 'Untitled',
+          type: isStage ? 'backdrop' as any : 'costume' as any,
+          spriteName,
+          filename,
+          format,
+          size
+        });
+      }
+
+      // 处理声音
+      const sounds = target.sounds || [];
+      for (const sound of sounds) {
+        const assetId = sound.assetId || sound.md5ext || '';
+        const format = this.getFormatFromAsset(assetId) || 'wav';
+        const filename = this.getAssetFilename(assetId);
+        
+        // 从 ZIP 中获取文件大小
+        const size = this.getFileSize(zip, filename);
+        
+        resources.push({
+          name: sound.name || 'Untitled',
+          type: 'sound' as any,
+          spriteName,
+          filename,
+          format,
+          size
+        });
+      }
+    }
+
+    return resources;
+  }
+
+  /**
+   * 从 ZIP 中获取文件大小
+   */
+  private getFileSize(zip: AdmZip, filename: string): number {
+    try {
+      const entry = zip.getEntry(filename);
+      return entry ? entry.header.size : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * 从资源 ID 中获取文件格式
+   */
+  private getFormatFromAsset(assetId: string): string | null {
+    if (!assetId) return null;
+    
+    // 尝试从 md5ext 格式获取
+    const parts = assetId.split('.');
+    if (parts.length > 1) {
+      return parts[parts.length - 1].toLowerCase();
+    }
+    
+    return null;
+  }
+
+  /**
+   * 获取资源文件名
+   */
+  private getAssetFilename(assetId: string): string {
+    if (!assetId) return '';
+    
+    // Scratch 使用 md5ext 格式
+    if (assetId.includes('.')) {
+      return assetId;
+    }
+    
+    // 如果只有 md5，添加 .png 作为默认
+    return `${assetId}.png`;
+  }
+}
