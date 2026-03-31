@@ -2,6 +2,9 @@
  * TurboWarp 扩展类型定义
  */
 
+/** 翻译数据类型 */
+export type TranslationData = Record<string, Record<string, string>>;
+
 export interface ExtensionMetadata {
   /** 扩展 ID */
   id: string;
@@ -27,6 +30,8 @@ export interface ExtensionMetadata {
   unsandboxed: boolean;
   /** 原始源代码 */
   sourceCode: string;
+  /** 国际化翻译数据 */
+  translations?: TranslationData;
 }
 
 export interface BlockDefinition {
@@ -34,8 +39,10 @@ export interface BlockDefinition {
   opcode: string;
   /** 积木类型 */
   blockType: ExtensionBlockType;
-  /** 积木文本 */
+  /** 积木文本 (可能是函数调用，用于国际化) */
   text: string;
+  /** 翻译键 (如果有) */
+  translationKey?: string;
   /** 参数定义 */
   arguments: Record<string, ArgumentDefinition>;
   /** 是否边缘激活 (用于 hat blocks) */

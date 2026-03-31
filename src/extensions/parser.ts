@@ -44,6 +44,7 @@ export class ExtensionParser {
       menus: this.extractMenus(ast),
       unsandboxed: this.isUnsandboxed(),
       sourceCode: this.sourceCode,
+      translations: this.extractTranslations(ast),
     };
 
     this.extensionMetadata = metadata;
@@ -77,14 +78,118 @@ export class ExtensionParser {
   }
 
   /**
+   * 提取翻译数据
+   */
+  private extractTranslations(ast: t.File): Record<string, Record<string, string>> | undefined {
+    let translations: Record<string, Record<string, string>> | undefined;
+
+    traverseFunc(ast, {
+      CallExpression(path) {
+        const callee = path.node.callee;
+        
+        // 检查是否是 Scratch.translate.setup 调用
+        if (t.isMemberExpression(callee) &&
+            t.isMemberExpression(callee.object) &&
+            t.isIdentifier(callee.object.object) && callee.object.object.name === 'Scratch' &&
+            t.isIdentifier(callee.object.property) && callee.object.property.name === 'translate' &&
+            t.isIdentifier(callee.property) && callee.property.name === 'setup') {
+          
+          const arg = path.node.arguments[0];
+          
+          if (t.isObjectExpression(arg)) {
+            translations = {};
+            arg.properties.forEach(prop => {
+              if (t.isObjectProperty(prop)) {
+                let langCode: string | undefined;
+                
+                // 处理 StringLiteral 类型的键 (如 "es", "zh-cn")
+                if (t.isStringLiteral(prop.key)) {
+                  langCode = prop.key.value;
+                }
+                // 处理 Identifier 类型的键
+                else if (t.isIdentifier(prop.key)) {
+                  langCode = prop.key.name;
+                }
+                
+                if (langCode && t.isObjectExpression(prop.value)) {
+                  translations![langCode] = {};
+                  prop.value.properties.forEach(transProp => {
+                    if (t.isObjectProperty(transProp)) {
+                      let key: string | undefined;
+                      
+                      // 处理 StringLiteral 类型的键
+                      if (t.isStringLiteral(transProp.key)) {
+                        key = transProp.key.value;
+                      }
+                      // 处理 Identifier 类型的键
+                      else if (t.isIdentifier(transProp.key)) {
+                        key = transProp.key.name;
+                      }
+                      
+                      if (key && t.isStringLiteral(transProp.value)) {
+                        translations![langCode][key] = transProp.value.value;
+                      }
+                    }
+                  });
+                }
+              }
+            });
+          }
+        }
+      }
+    });
+
+    return translations;
+  }
+
+  /**
+   * 从 Scratch.translate 调用中提取文本
+   */
+  private extractTranslateCall(node: t.Node): string | undefined {
+    if (!t.isCallExpression(node)) return undefined;
+    
+    const callee = node.callee;
+    
+    // 检查是否是 Scratch.translate 调用
+    if (t.isMemberExpression(callee) &&
+        t.isIdentifier(callee.object) && callee.object.name === 'Scratch' &&
+        t.isIdentifier(callee.property) && callee.property.name === 'translate') {
+      
+      const arg = node.arguments[0];
+      
+      if (t.isStringLiteral(arg)) {
+        return arg.value;
+      } else if (t.isObjectExpression(arg)) {
+        // 查找 default 属性
+        for (const prop of arg.properties) {
+          if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === 'default') {
+            if (t.isStringLiteral(prop.value)) {
+              return prop.value.value;
+            }
+          }
+        }
+      }
+    }
+    
+    return undefined;
+  }
+
+  /**
    * 从对象表达式中提取属性值
    */
   private getObjectPropertyValue(obj: t.ObjectExpression, propertyName: string): string | undefined {
     for (const prop of obj.properties) {
       if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === propertyName) {
         const value = prop.value;
+        
+        // 检查是否是字符串字面量
         if (t.isStringLiteral(value)) {
           return value.value;
+        }
+        
+        // 检查是否是 Scratch.translate 调用
+        if (t.isCallExpression(value)) {
+          return this.extractTranslateCall(value);
         }
       }
     }
