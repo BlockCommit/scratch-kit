@@ -546,6 +546,7 @@ export class ExtensionParser {
 
   /**
    * 生成积木的 scratchblocks 格式文本
+   * 完全符合 scratchblocks 规范
    */
   generateScratchblocks(blocks?: BlockDefinition[]): string[] {
     const blocksToProcess = blocks || this.extensionMetadata?.blocks || [];
@@ -564,7 +565,21 @@ export class ExtensionParser {
 
           // 如果有菜单，使用菜单占位符
           if (arg.menu && this.extensionMetadata?.menus?.[arg.menu]) {
-            placeholder = `[${arg.menu} v]`;
+            const menu = this.extensionMetadata.menus[arg.menu];
+            if (menu.acceptReporters) {
+              // 接受报告器的菜单：[menu v]
+              placeholder = `[${arg.menu} v]`;
+            } else {
+              // 不接受报告器的菜单：直接显示第一个选项
+              if (menu.items.length > 0) {
+                const firstItem = menu.items[0];
+                if (typeof firstItem === 'string') {
+                  placeholder = firstItem;
+                } else {
+                  placeholder = firstItem.text;
+                }
+              }
+            }
           }
 
           text = text.replace(new RegExp(`\\{${argName}\\}`, 'g'), placeholder);
@@ -577,14 +592,24 @@ export class ExtensionParser {
           // 普通命令块，不需要特殊处理
           break;
         case 'REPORTER':
+          // 报告器块：用圆括号包裹
           text = `(${text})`;
           break;
         case 'BOOLEAN':
+          // 布尔块：用尖括号包裹
           text = `<${text}>`;
           break;
         case 'HAT':
+          // Hat 块：添加 when 前缀
+          if (!text.startsWith('when')) {
+            text = `when ${text}`;
+          }
+          break;
         case 'EVENT':
-          text = `when ${text}`;
+          // 事件块：类似于 Hat 块
+          if (!text.startsWith('when')) {
+            text = `when ${text}`;
+          }
           break;
       }
 
@@ -595,7 +620,7 @@ export class ExtensionParser {
   }
 
   /**
-   * 根据参数类型获取占位符
+   * 根据参数类型获取占位符（符合 scratchblocks 规范）
    */
   private getPlaceholderForArgType(type: string): string {
     switch (type) {
@@ -608,7 +633,8 @@ export class ExtensionParser {
       case 'COLOR':
         return '[color]';
       case 'ANGLE':
-        return '[direction]';
+        // 角度参数使用圆形输入框
+        return '(direction)';
       case 'MATRIX':
         return '[matrix]';
       case 'NOTE':
