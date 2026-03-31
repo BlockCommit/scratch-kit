@@ -1,15 +1,31 @@
 # scratch-kit
 
-A full-featured tool for processing Scratch projects and related content.
+A comprehensive toolkit for processing Scratch projects, extensions, and related content.
 
 ## Features
 
-- Parse .sb3 project files
-- Transform and normalize Scratch projects
+### Project Processing
+- Parse and analyze .sb3 project files
 - Extract project metadata and statistics
+- Transform and normalize Scratch projects
 - Validate project structure
-- **Convert Scratch blocks to scratchblocks format**
-- TypeScript support with full type definitions
+- Detect project platform (Scratch, TurboWarp, etc.)
+- Extract project resources (costumes, sounds, backdrops)
+
+### Extension Support
+- Parse TurboWarp extensions using Babel AST
+- Extract extension metadata (ID, name, colors, blocks, menus)
+- Generate scratchblocks format text compliant with specifications
+- Support internationalization (Scratch.translate)
+- Extract translation data from extensions
+- Generate TypeScript type definitions from extensions
+- Validate extension metadata
+
+### Scratchblocks Conversion
+- Convert Scratch blocks to scratchblocks format
+- Full support for all block types and arguments
+- Parameter placeholder generation according to specifications
+- Locale support for different languages
 
 ## Installation
 
@@ -19,24 +35,101 @@ npm install scratch-kit
 
 ## Usage
 
-### Basic Project Processing
+### SB3 Project Analysis
 
 ```typescript
-import { parseSb3File, transformProject, validateProject } from 'scratch-kit';
+import { SB3Parser } from 'scratch-kit';
 
 // Parse a .sb3 file
-const project = await parseSb3File('project.sb3');
+const parser = new SB3Parser('project.sb3');
+const project = await parser.parse();
 
-// Validate the project
-if (validateProject(project)) {
-  console.log('Valid project!');
-}
+// Access project information
+console.log('Project:', project.info.name);
+console.log('Sprites:', project.info.spriteCount);
+console.log('Blocks:', project.info.totalBlocks);
+console.log('Platform:', project.info.platform?.name);
+console.log('Extensions:', project.info.extensions);
 
-// Transform the project
-const transformed = transformProject(project, {
-  normalizeBlocks: true,
-  removeUnused: true
+// Access sprite details
+project.sprites.forEach(sprite => {
+  console.log(`${sprite.name}: ${sprite.blockCount} blocks`);
 });
+
+// Access resources
+project.resources.forEach(resource => {
+  console.log(`${resource.name} (${resource.type}): ${resource.size} bytes`);
+});
+```
+
+### TurboWarp Extension Parsing
+
+```typescript
+import { ExtensionParser, parseExtension } from 'scratch-kit';
+
+// Parse extension from source code
+const sourceCode = `
+  (function(Scratch) {
+    class MyExtension {
+      getInfo() {
+        return {
+          id: 'myext',
+          name: 'My Extension',
+          blocks: [
+            {
+              opcode: 'move',
+              blockType: Scratch.BlockType.COMMAND,
+              text: 'move {STEPS} steps',
+              arguments: {
+                STEPS: {
+                  type: Scratch.ArgumentType.NUMBER,
+                  defaultValue: '10'
+                }
+              }
+            }
+          ]
+        };
+      }
+    }
+    Scratch.extensions.register(new MyExtension());
+  })(Scratch)
+`;
+
+const parser = new ExtensionParser(sourceCode);
+const metadata = parser.parse();
+
+// Generate scratchblocks format
+const scratchblocks = parser.generateScratchblocks();
+console.log(scratchblocks);
+// Output: ['move [number] steps']
+
+// Get TypeScript type definitions
+const types = parser.toTypeScript();
+console.log(types);
+
+// Export as JSON
+const json = parser.toJSON();
+
+// Parse extension with helper function
+const result = parseExtension(sourceCode);
+console.log(result.metadata);
+console.log(result.scratchblocks);
+console.log(result.typeDefinitions);
+```
+
+### Extension Validation
+
+```typescript
+import { validateExtension } from 'scratch-kit';
+
+const metadata = parser.parse();
+const validation = validateExtension(metadata);
+
+if (validation.valid) {
+  console.log('Extension is valid!');
+} else {
+  console.error('Validation errors:', validation.errors);
+}
 ```
 
 ### Scratchblocks Conversion
@@ -75,23 +168,69 @@ console.log(scratchblocksCode);
 // move (10) steps
 ```
 
-## API
+## API Reference
 
-### Project Processing
+### SB3 Project Analysis
 
-#### parseSb3File(filePath: string): Promise<ScratchProject>
-Parses a Scratch .sb3 file and returns the project object.
+#### SB3Parser
+Parser for Scratch 3.0 .sb3 files.
 
-#### transformProject(project: ScratchProject, options?: TransformOptions): ScratchProject
-Transforms a Scratch project with various options.
+**Constructor:**
+```typescript
+new SB3Parser(filePath: string, options?: SB3ParseOptions)
+```
 
-#### validateProject(project: ScratchProject): boolean
-Validates if a project object has the correct structure.
+**Methods:**
+- `parse(): Promise<SB3Project>` - Parse the SB3 file and return project information
+
+**Types:**
+- `SB3Project` - Complete project information
+- `SB3ProjectInfo` - Project metadata and statistics
+- `SpriteInfo` - Sprite/stage details
+- `ResourceInfo` - Resource file information
+- `PlatformInfo` - Platform detection results
+
+### Extension Parsing
+
+#### ExtensionParser
+Parser for TurboWarp extensions using Babel AST.
+
+**Constructor:**
+```typescript
+new ExtensionParser(sourceCode: string)
+```
+
+**Methods:**
+- `parse(): ExtensionMetadata` - Parse extension and extract metadata
+- `generateScratchblocks(): string[]` - Generate scratchblocks format text
+- `toTypeScript(): string` - Generate TypeScript type definitions
+- `toJSON(): string` - Export as JSON
+
+**Helper Functions:**
+- `parseExtension(sourceCode: string): ParsedExtension` - Parse and return all information
+- `validateExtension(metadata: ExtensionMetadata): ValidationResult` - Validate extension metadata
+- `createParser(sourceCode: string): ExtensionParser` - Create parser instance
+
+**Types:**
+- `ExtensionMetadata` - Complete extension metadata
+- `BlockDefinition` - Block definition
+- `ArgumentDefinition` - Argument definition
+- `MenuDefinition` - Menu definition
+- `TranslationData` - Internationalization data
 
 ### Scratchblocks Conversion
 
-#### toScratchblocks(scriptStart: string, blocks: Sb3Blocks, locale?: string, opts?: BlockOptions): string
-Converts Scratch blocks to scratchblocks format.
+#### toScratchblocks
+Convert Scratch blocks to scratchblocks format.
+
+```typescript
+toScratchblocks(
+  scriptStart: string,
+  blocks: Sb3Blocks,
+  locale?: string,
+  opts?: BlockOptions
+): string
+```
 
 **Parameters:**
 - `scriptStart`: The block ID to start parsing from (must be a hat block or stack block)
@@ -123,6 +262,9 @@ npm run dev
 
 # Lint
 npm run lint
+
+# Test
+npm test
 ```
 
 ## License
