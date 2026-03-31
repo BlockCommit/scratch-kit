@@ -1,6 +1,19 @@
 /**
  * TurboWarp 扩展解析器
- * 使用 Babel AST 解析，更加准确和健壮
+ * 
+ * 使用 Babel AST 解析 TurboWarp 扩展的 JavaScript 源代码，
+ * 提取扩展的元数据、积木定义、参数信息和翻译数据。
+ * 
+ * 相比正则表达式解析，AST 解析更加准确和健壮，
+ * 能够正确处理复杂的嵌套结构和函数调用。
+ * 
+ * 功能特性：
+ * - 解析扩展元数据（ID、名称、颜色等）
+ * - 提取积木定义（命令、报告器、布尔、Hat 块）
+ * - 解析参数类型和默认值
+ * - 提取菜单定义和选项
+ * - 支持国际化翻译（Scratch.translate）
+ * - 生成符合 scratchblocks 规范的文本
  */
 
 import { parse } from '@babel/parser';
@@ -10,27 +23,34 @@ import traverse from '@babel/traverse';
 import * as t from '@babel/types';
 import type { ExtensionMetadata, BlockDefinition, ArgumentDefinition, MenuDefinition, ExtensionBlockType, ExtensionArgumentType } from './types.js';
 
-// @ts-ignore
+// 处理 @babel/traverse 的默认导出问题
 const traverseFunc = (traverse as any).default || traverse;
 
 export class ExtensionParser {
   private sourceCode: string;
   private extensionMetadata: ExtensionMetadata | null = null;
 
+  /**
+   * 构造函数
+   * @param sourceCode - TurboWarp 扩展的 JavaScript 源代码
+   */
   constructor(sourceCode: string) {
     this.sourceCode = sourceCode;
   }
 
   /**
    * 解析扩展，提取所有信息
+   * 
+   * @returns 扩展元数据对象
    */
   parse(): ExtensionMetadata {
-    // 解析源代码为 AST
+    // 将源代码解析为 AST
     const ast = parse(this.sourceCode, {
       sourceType: 'module',
       plugins: ['jsx']
     });
 
+    // 构建元数据对象
     const metadata: ExtensionMetadata = {
       id: this.extractId(ast),
       name: this.extractName(ast),
@@ -53,6 +73,13 @@ export class ExtensionParser {
 
   /**
    * 查找 getInfo() 方法的返回值
+   * 
+   * getInfo() 方法返回一个对象，包含扩展的所有元数据。
+   * 此方法在 AST 中遍历查找 ClassMethod 类型的 getInfo 方法，
+   * 并提取其 return 语句的参数（即返回的对象表达式）。
+   * 
+   * @param ast - AST 根节点
+   * @returns getInfo() 方法返回的对象表达式，如果未找到则返回 null
    */
   private findGetInfoReturn(ast: t.File): t.ObjectExpression | null {
     let getInfoReturn: t.ObjectExpression | null = null;
@@ -61,7 +88,7 @@ export class ExtensionParser {
       ClassMethod(path) {
         // 检查是否是 getInfo 方法
         if (t.isIdentifier(path.node.key) && path.node.key.name === 'getInfo') {
-          // 查找方法体中的 return 语句
+          // 在方法体内查找 return 语句
           path.traverse({
             ReturnStatement(returnPath) {
               const argument = returnPath.node.argument;
@@ -79,6 +106,14 @@ export class ExtensionParser {
 
   /**
    * 提取翻译数据
+   * 
+   * 解析 Scratch.translate.setup() 调用，提取所有语言的翻译映射。
+   * 翻译数据结构为：{ "语言代码": { "键": "翻译文本" } }
+   * 
+   * 例如：{ "zh-cn": { "_Text": "文本" }, "es": { "_Text": "Texto" } }
+   * 
+   * @param ast - AST 根节点
+   * @returns 翻译数据对象，如果未找到则返回 undefined
    */
   private extractTranslations(ast: t.File): Record<string, Record<string, string>> | undefined {
     let translations: Record<string, Record<string, string>> | undefined;
