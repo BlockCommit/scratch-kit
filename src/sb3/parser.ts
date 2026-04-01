@@ -112,7 +112,7 @@ export class SB3Parser {
      * - 项目名称
      * - 角色数量
      * - 积木总数（排除原型定义）
-     * - 扩展列表
+     * - 扩展列表（只包含包含 JS 代码的自定义扩展）
      * - 监控器数量
      * - 平台信息
      * - 版本信息
@@ -120,51 +120,94 @@ export class SB3Parser {
      * @param projectJson - project.json 对象
      * @returns 项目基本信息
      */
-    private extractProjectInfo(projectJson: any): SB3ProjectInfo {    const targets = projectJson.targets || [];
-    const extensions = projectJson.extensions || [];
-    const meta = projectJson.meta || {};
-    
-    // 计算积木总数
-    let totalBlocks = 0;
-    let monitorCount = 0;
-    
-    for (const target of targets) {
-      const blocks = target.blocks || {};
+    private extractProjectInfo(projectJson: any): SB3ProjectInfo {
+      const targets = projectJson.targets || [];
+      const allExtensions = projectJson.extensions || [];
+      const meta = projectJson.meta || {};
       
-      for (const blockId in blocks) {
-        const block = blocks[blockId];
-        // 跳过原型定义
-        if (block.parent !== null || block.topLevel) {
-          totalBlocks++;
-          // 检查是否为监控器
-          if (block.opcode && block.opcode.startsWith('data_')) {
-            // 这是一个变量/列表监控器
-            if (block.shadow === false) {
-              monitorCount++;
+      // 只提取包含 JS 代码的自定义扩展
+      const customExtensions = this.filterCustomExtensions(allExtensions);
+      
+      // 计算积木总数
+      let totalBlocks = 0;
+      let monitorCount = 0;
+      
+      for (const target of targets) {
+        const blocks = target.blocks || {};
+        
+        for (const blockId in blocks) {
+          const block = blocks[blockId];
+          // 跳过原型定义
+          if (block.parent !== null || block.topLevel) {
+            totalBlocks++;
+            // 检查是否为监控器
+            if (block.opcode && block.opcode.startsWith('data_')) {
+              // 这是一个变量/列表监控器
+              if (block.shadow === false) {
+                monitorCount++;
+              }
             }
           }
         }
       }
+  
+      // 提取平台信息
+      const platformInfo = meta.platform ? {
+        name: meta.platform.name || 'Unknown',
+        url: meta.platform.url
+      } : undefined;
+  
+      return {
+        name: meta.name || 'Untitled',
+        spriteCount: targets.length,
+        totalBlocks,
+        extensions: customExtensions,
+        monitorCount,
+        platform: platformInfo,
+        semver: meta.semver,
+        vm: meta.vm
+      };
     }
-
-    // 提取平台信息
-    const platformInfo = meta.platform ? {
-      name: meta.platform.name || 'Unknown',
-      url: meta.platform.url
-    } : undefined;
-
-    return {
-      name: meta.name || 'Untitled',
-      spriteCount: targets.length,
-      totalBlocks,
-      extensions,
-      monitorCount,
-      platform: platformInfo,
-      semver: meta.semver,
-      vm: meta.vm
-    };
-  }
-
+  
+    /**
+     * 过滤出只包含 JS 代码的自定义扩展
+     * 
+     * 检查每个扩展是否在 SB3 文件中包含对应的 JS 文件。
+     * 只有包含 JS 文件的扩展才被视为自定义扩展，
+     * Scratch/TurboWarp 自带的扩展不会包含 JS 文件。
+     * 
+     * @param extensions - 所有扩展名称列表
+     * @returns 自定义扩展名称列表
+     */
+    private filterCustomExtensions(extensions: string[]): string[] {
+      if (!this.zip || !extensions || extensions.length === 0) {
+        return [];
+      }
+  
+      const customExtensions: string[] = [];
+  
+      for (const extName of extensions) {
+        // 检查 ZIP 中是否有对应的 JS 文件
+        // 常见的文件名格式：
+        // - {extName}.js
+        // - {extName}.js (可能在不同目录)
+        const possibleFiles = [
+          `${extName}.js`,
+          `extensions/${extName}.js`,
+        ];
+  
+        const hasJsFile = possibleFiles.some(filename => {
+          const entry = this.zip!.getEntry(filename);
+          return entry !== null && entry.entryName.endsWith('.js');
+        });
+  
+        if (hasJsFile) {
+          customExtensions.push(extName);
+        }
+      }
+  
+      return customExtensions;
+    }
   /**
    * 提取角色信息
    * 

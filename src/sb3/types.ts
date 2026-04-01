@@ -21,6 +21,8 @@ export interface PlatformInfo {
  * SB3 项目基本信息
  * 
  * 包含项目的统计信息和元数据
+ * 注意：extensions 列表只包含包含 JS 代码的自定义扩展，
+ * 不包含 Scratch/TurboWarp 自带的扩展。
  */
 export interface SB3ProjectInfo {
   /** 项目名称 */
@@ -29,7 +31,7 @@ export interface SB3ProjectInfo {
   spriteCount: number;
   /** 积木总数（排除原型定义） */
   totalBlocks: number;
-  /** 扩展列表（如 pen、music 等） */
+  /** 自定义扩展列表（仅包含包含 JS 代码的扩展，不含 Scratch/TurboWarp 自带扩展） */
   extensions: string[];
   /** 监控器数量（变量/列表监控器） */
   monitorCount: number;
